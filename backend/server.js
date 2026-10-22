@@ -83,7 +83,7 @@ const seedDatabase = async () => {
 const startServer = async () => {
   try {
     console.log(`Connecting to MongoDB at: ${MONGO_URI}`);
-    await mongoose.connect(MONGO_URI);
+    await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 2000 });
     console.log('Connected to MongoDB successfully.');
     await seedDatabase();
   } catch (err) {
