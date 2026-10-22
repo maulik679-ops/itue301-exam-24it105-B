@@ -110,12 +110,7 @@ function App() {
           path="/fleet"
           element={
             <ProtectedRoute>
-              <FleetPage
-                vehicles={vehicles}
-                loading={loading}
-                error={error}
-                onBookSubmit={handleBookSubmit}
-              />
+              <FleetPage onBookSubmit={handleBookSubmit} />
             </ProtectedRoute>
           }
         />

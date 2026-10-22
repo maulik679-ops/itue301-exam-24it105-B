@@ -1,7 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import VehicleCard from '../components/VehicleCard';
 
-const FleetPage = ({ vehicles = [], loading = false, error = '', onBookSubmit }) => {
+const API_BASE_URL = 'http://localhost:5000/api/v1';
+
+/**
+ * Task 4: REST API Consumption in React
+ * - In FleetPage, retrieves vehicle information using GET /api/v1/vehicles via Axios.
+ * - Uses useEffect() so the request is made when the component mounts.
+ * - Maintains 3 states: vehicles, loading, and error.
+ * - Displays loading indicator, error message, or a grid of VehicleCard components.
+ * - Client-side type filter (All | Hatchback | Sedan | SUV) applied without new API requests.
+ */
+const FleetPage = ({ onBookSubmit }) => {
+  // Task 4: Required 3 states
+  const [vehicles, setVehicles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  // Task 4: Client-side type filter state
+  const [selectedType, setSelectedType] = useState('All');
+
   // Task 2: State management for booking form
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [pickupDate, setPickupDate] = useState('');
@@ -9,12 +28,35 @@ const FleetPage = ({ vehicles = [], loading = false, error = '', onBookSubmit })
   const [bookingMessage, setBookingMessage] = useState(null);
   const [bookingLoading, setBookingLoading] = useState(false);
 
-  // Client-side filter (Task 4)
-  const [selectedType, setSelectedType] = useState('All');
+  // Task 4: Fetch vehicles from GET /api/v1/vehicles on component mount
+  const fetchVehicles = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await axios.get(`${API_BASE_URL}/vehicles`);
+      setVehicles(res.data.data || res.data);
+    } catch (err) {
+      setError(
+        err?.response?.data?.error ||
+          err?.message ||
+          'Failed to load vehicle fleet. Please verify backend is running on http://localhost:5000'
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const filteredVehicles = selectedType === 'All'
-    ? vehicles
-    : vehicles.filter((v) => v.type.toLowerCase() === selectedType.toLowerCase());
+  useEffect(() => {
+    fetchVehicles();
+  }, []);
+
+  // Task 4: Client-side filtering on the already-fetched array (no new network request)
+  const filteredVehicles =
+    selectedType === 'All'
+      ? vehicles
+      : vehicles.filter(
+          (v) => v.type.toLowerCase() === selectedType.toLowerCase()
+        );
 
   const handleSelectVehicle = (vehicle) => {
     setSelectedVehicle(vehicle);
@@ -28,7 +70,10 @@ const FleetPage = ({ vehicles = [], loading = false, error = '', onBookSubmit })
       return;
     }
     if (!pickupDate || !returnDate) {
-      setBookingMessage({ type: 'error', text: 'Please select both pickup and return dates.' });
+      setBookingMessage({
+        type: 'error',
+        text: 'Please select both pickup and return dates.',
+      });
       return;
     }
 
@@ -50,6 +95,8 @@ const FleetPage = ({ vehicles = [], loading = false, error = '', onBookSubmit })
       setSelectedVehicle(null);
       setPickupDate('');
       setReturnDate('');
+      // Refresh fleet data to update availability badge
+      await fetchVehicles();
     } catch (err) {
       setBookingMessage({
         type: 'error',
@@ -63,9 +110,11 @@ const FleetPage = ({ vehicles = [], loading = false, error = '', onBookSubmit })
   return (
     <div className="container">
       <h2>DriveEasy Vehicle Fleet</h2>
-      <p style={{ color: '#718096' }}>Browse and book available self-drive vehicles in real-time.</p>
+      <p style={{ color: '#718096' }}>
+        Live vehicle inventory fetched from Express REST API (<code>GET /api/v1/vehicles</code>).
+      </p>
 
-      {/* Client-side Type Filter (Task 4) */}
+      {/* Task 4: Client-side Filter Bar */}
       <div className="filters">
         <strong>Filter by Type:</strong>
         {['All', 'Hatchback', 'Sedan', 'SUV'].map((type) => (
@@ -83,8 +132,8 @@ const FleetPage = ({ vehicles = [], loading = false, error = '', onBookSubmit })
       {/* Task 2: Booking Form with useState */}
       <div className="form-card" style={{ maxWidth: '600px', margin: '20px 0' }}>
         <h3 style={{ color: '#1c3d5e', marginBottom: '12px' }}>Book a Vehicle</h3>
-        
-        {/* Dynamic display of selected state */}
+
+        {/* Dynamic state display */}
         <p style={{ marginBottom: '10px' }}>
           <strong>Selected Vehicle:</strong>{' '}
           {selectedVehicle ? (
@@ -92,12 +141,18 @@ const FleetPage = ({ vehicles = [], loading = false, error = '', onBookSubmit })
               {selectedVehicle.model} ({selectedVehicle.type}) - ₹{selectedVehicle.pricePerDay}/day
             </span>
           ) : (
-            <span style={{ color: '#a0aec0', fontStyle: 'italic' }}>None selected (Click "Book Now" below)</span>
+            <span style={{ color: '#a0aec0', fontStyle: 'italic' }}>
+              None selected (Click "Book Now" below on an available car)
+            </span>
           )}
         </p>
 
         {bookingMessage && (
-          <div className={`alert ${bookingMessage.type === 'error' ? 'alert-error' : 'alert-success'}`}>
+          <div
+            className={`alert ${
+              bookingMessage.type === 'error' ? 'alert-error' : 'alert-success'
+            }`}
+          >
             {bookingMessage.text}
           </div>
         )}
@@ -130,32 +185,43 @@ const FleetPage = ({ vehicles = [], loading = false, error = '', onBookSubmit })
             className="btn-primary"
             disabled={!selectedVehicle || bookingLoading}
           >
-            {bookingLoading ? 'Confirming Reservation...' : 'Confirm Reservation'}
+            {bookingLoading ? 'Processing Reservation...' : 'Confirm Reservation'}
           </button>
         </form>
       </div>
 
-      {/* Task 4: Loading & Error states */}
-      {loading && <div className="loading-spinner">⏳ Loading vehicles from server...</div>}
+      {/* Task 4: 1) Loading indicator while request is in progress */}
+      {loading && (
+        <div className="loading-spinner">
+          ⏳ Loading vehicle inventory from <code>/api/v1/vehicles</code>...
+        </div>
+      )}
+
+      {/* Task 4: 2) Friendly error message if request fails */}
       {error && <div className="alert alert-error">❌ {error}</div>}
 
-      {/* Task 1 & 4: Render Grid of VehicleCard Components */}
+      {/* Task 4: 3) Render grid of VehicleCard components after successful request */}
       {!loading && !error && (
-        <div className="vehicle-grid">
-          {filteredVehicles.length === 0 ? (
-            <p>No vehicles found for the selected category.</p>
-          ) : (
-            filteredVehicles.map((vehicle) => (
-              <VehicleCard
-                key={vehicle._id || vehicle.model}
-                model={vehicle.model}
-                type={vehicle.type}
-                pricePerDay={vehicle.pricePerDay}
-                available={vehicle.available}
-                onBook={() => handleSelectVehicle(vehicle)}
-              />
-            ))
-          )}
+        <div>
+          <p style={{ fontSize: '0.9rem', color: '#718096', marginBottom: '10px' }}>
+            Showing {filteredVehicles.length} of {vehicles.length} vehicles (Filtered: {selectedType})
+          </p>
+          <div className="vehicle-grid">
+            {filteredVehicles.length === 0 ? (
+              <p>No vehicles found for the selected category.</p>
+            ) : (
+              filteredVehicles.map((vehicle) => (
+                <VehicleCard
+                  key={vehicle._id || vehicle.model}
+                  model={vehicle.model}
+                  type={vehicle.type}
+                  pricePerDay={vehicle.pricePerDay}
+                  available={vehicle.available}
+                  onBook={() => handleSelectVehicle(vehicle)}
+                />
+              ))
+            )}
+          </div>
         </div>
       )}
     </div>
