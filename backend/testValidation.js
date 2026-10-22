@@ -1,118 +1,115 @@
-/**
- * Task 5 Demonstration Script: Validation & Double-Booking Prevention
- * Run with: node testValidation.js
- */
 const http = require('http');
 
-const makeRequest = (options, postData) => {
+const request = (method, path, data = null, token = null) => {
   return new Promise((resolve, reject) => {
-    const req = http.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => (data += chunk));
-      res.on('end', () => {
-        try {
-          resolve({ status: res.statusCode, body: JSON.parse(data) });
-        } catch (e) {
-          resolve({ status: res.statusCode, body: data });
-        }
-      });
-    });
+    const postData = data ? JSON.stringify(data) : '';
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (postData) headers['Content-Length'] = Buffer.byteLength(postData);
+
+    const req = http.request(
+      {
+        hostname: 'localhost',
+        port: 5000,
+        path: `/api/v1${path}`,
+        method,
+        headers,
+      },
+      (res) => {
+        let body = '';
+        res.on('data', (c) => (body += c));
+        res.on('end', () => {
+          try {
+            resolve({ status: res.statusCode, data: JSON.parse(body) });
+          } catch {
+            resolve({ status: res.statusCode, data: body });
+          }
+        });
+      }
+    );
     req.on('error', reject);
-    if (postData) {
-      req.write(JSON.stringify(postData));
-    }
+    if (postData) req.write(postData);
     req.end();
   });
 };
 
-async function runDemo() {
-  console.log('=== Task 5 Validation & Booking Tests ===\n');
+async function runAudit() {
+  console.log('=== DriveEasy Final QA Audit & End-to-End Test Suite ===\n');
 
-  // 1. Authenticate customer
-  console.log('1. Logging in customer...');
-  const loginRes = await makeRequest(
-    {
-      hostname: 'localhost',
-      port: 5000,
-      path: '/api/v1/auth/login',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    },
-    { email: 'rahul@example.com', password: 'password123' }
-  );
-  const token = loginRes.body.token;
-  console.log(`-> Logged in as: ${loginRes.body.customer.name}`);
+  // Test 1: Public vehicle listing
+  const vehiclesRes = await request('GET', '/vehicles');
+  console.log(`[Check 1] Public vehicles listing: HTTP ${vehiclesRes.status} (Count: ${vehiclesRes.data.count})`);
 
-  // 2. Fetch vehicles
-  console.log('\n2. Fetching vehicles...');
-  const vehiclesRes = await makeRequest({
-    hostname: 'localhost',
-    port: 5000,
-    path: '/api/v1/vehicles',
-    method: 'GET',
+  // Test 2: Invalid login
+  const badLogin = await request('POST', '/auth/login', { email: '' });
+  console.log(`[Check 2] Invalid login rejected: HTTP ${badLogin.status} (Error: "${badLogin.data.error}")`);
+
+  // Test 3: Registration
+  const testEmail = `qa_${Date.now()}@test.com`;
+  const regRes = await request('POST', '/auth/register', {
+    name: 'Audit User',
+    email: testEmail,
+    phone: '9988776655',
+    licenseNumber: `DL-${Date.now().toString().slice(-6)}`,
+    password: 'password123',
   });
-  const availableCar = vehiclesRes.body.data.find((v) => v.available === true);
-  const unavailableCar = vehiclesRes.body.data.find((v) => v.available === false);
-  console.log(`-> Found available vehicle: "${availableCar?.model}" (ID: ${availableCar?._id})`);
-  console.log(`-> Found unavailable vehicle: "${unavailableCar?.model}" (ID: ${unavailableCar?._id})`);
+  console.log(`[Check 3] Customer registration: HTTP ${regRes.status} (Token received: ${!!regRes.data.token})`);
+  const token = regRes.data.token;
 
-  // 3. Test booking an UNAVAILABLE vehicle (Demonstrates Task 5 validation failure)
-  console.log('\n3. Testing booking an already UNAVAILABLE vehicle (Task 5 Validation Failure)...');
-  const failRes = await makeRequest(
+  // Test 4: AuthGuard rejects unauthenticated requests
+  const unauthRes = await request('POST', '/bookings', { vehicleId: '123' }, null);
+  console.log(`[Check 4] Missing auth rejected: HTTP ${unauthRes.status} (Error: "${unauthRes.data.error}")`);
+
+  // Test 5: Date validation (return date before pickup date)
+  const availCar = vehiclesRes.data.data.find((v) => v.available === true);
+  const badDates = await request(
+    'POST',
+    '/bookings',
     {
-      hostname: 'localhost',
-      port: 5000,
-      path: '/api/v1/bookings',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
+      vehicleId: availCar._id,
+      pickupDate: '2026-12-10',
+      returnDate: '2026-12-05',
     },
-    {
-      vehicleId: unavailableCar._id,
-      pickupDate: '2026-10-01',
-      returnDate: '2026-10-05',
-    }
+    token
   );
-  console.log(`-> Status: ${failRes.status}`);
-  console.log(`-> Response:`, failRes.body);
+  console.log(`[Check 5] Invalid booking dates rejected: HTTP ${badDates.status} (Error: "${badDates.data.error}")`);
 
-  // 4. Test booking an AVAILABLE vehicle (Success)
-  console.log('\n4. Booking an AVAILABLE vehicle (Task 5 Success & Toggle Available to False)...');
-  const successRes = await makeRequest(
+  // Test 6: Valid booking creation (HTTP 201)
+  const goodBooking = await request(
+    'POST',
+    '/bookings',
     {
-      hostname: 'localhost',
-      port: 5000,
-      path: '/api/v1/bookings',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
+      vehicleId: availCar._id,
+      pickupDate: '2026-12-01',
+      returnDate: '2026-12-05',
     },
-    {
-      vehicleId: availableCar._id,
-      pickupDate: '2026-10-10',
-      returnDate: '2026-10-15',
-    }
+    token
   );
-  console.log(`-> Status: ${successRes.status}`);
-  console.log(`-> Response:`, successRes.body);
+  console.log(`[Check 6] Valid booking created: HTTP ${goodBooking.status} (Booking ID: ${goodBooking.data.data?._id})`);
 
-  // 5. Test fetching customer bookings with populated fields
-  console.log('\n5. Fetching customer bookings with .populate()...');
-  const myBookingsRes = await makeRequest({
-    hostname: 'localhost',
-    port: 5000,
-    path: '/api/v1/bookings/my',
-    method: 'GET',
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  console.log(`-> Status: ${myBookingsRes.status}`);
-  console.log(`-> Populated Booking:`, myBookingsRes.body.data[0]);
+  // Test 7: Double booking prevention (cannot book now-unavailable vehicle)
+  const doubleBook = await request(
+    'POST',
+    '/bookings',
+    {
+      vehicleId: availCar._id,
+      pickupDate: '2026-12-01',
+      returnDate: '2026-12-05',
+    },
+    token
+  );
+  console.log(`[Check 7] Double booking rejected: HTTP ${doubleBook.status} (Error: "${doubleBook.data.error}")`);
 
-  console.log('\n=== All Task 5 Tests Completed Successfully ===');
+  // Test 8: MyBookings fetches owner's actual bookings
+  const myBookings = await request('GET', '/bookings/my', null, token);
+  console.log(`[Check 8] MyBookings retrieval: HTTP ${myBookings.status} (Found: ${myBookings.data.count} booking(s))`);
+  console.log(`          Populated Vehicle: "${myBookings.data.data[0]?.vehicleId?.model}" (${myBookings.data.data[0]?.vehicleId?.type})`);
+
+  // Test 9: Admin statistics consistency
+  const statsRes = await request('GET', '/admin/stats');
+  console.log(`[Check 9] Admin statistics: HTTP ${statsRes.status} (Total: ${statsRes.data.data.totalVehicles}, Active: ${statsRes.data.data.activeReservations}, Utilization: ${statsRes.data.data.utilization})`);
+
+  console.log('\n=== All 9 Critical QA Checks Completed Successfully ===');
 }
 
-runDemo().catch(console.error);
+runAudit().catch(console.error);

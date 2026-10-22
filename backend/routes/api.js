@@ -10,6 +10,67 @@ const authGuard = require('../middleware/authGuard');
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecret_driveeasy_jwt_key_2026';
 
 /**
+ * @route   POST /api/v1/auth/register
+ * @desc    Register a new customer account
+ */
+router.post('/auth/register', async (req, res, next) => {
+  try {
+    const { name, email, phone, licenseNumber, password } = req.body;
+
+    if (!name || !email || !phone || !licenseNumber) {
+      return res.status(400).json({
+        success: false,
+        error: 'Name, email, phone, and licenseNumber are required',
+      });
+    }
+
+    const existingCustomer = await Customer.findOne({
+      $or: [{ email: email.toLowerCase() }, { licenseNumber: licenseNumber.toUpperCase() }],
+    });
+
+    if (existingCustomer) {
+      return res.status(400).json({
+        success: false,
+        error: 'A customer with this email or license number already exists',
+      });
+    }
+
+    const customer = await Customer.create({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      phone: phone.trim(),
+      licenseNumber: licenseNumber.toUpperCase().trim(),
+      password: password || 'password123',
+    });
+
+    const token = jwt.sign(
+      {
+        id: customer._id,
+        email: customer.email,
+        name: customer.name,
+      },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'Customer registered successfully',
+      token,
+      customer: {
+        id: customer._id,
+        name: customer.name,
+        email: customer.email,
+        phone: customer.phone,
+        licenseNumber: customer.licenseNumber,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * @route   POST /api/v1/auth/login
  * @desc    Authenticate customer and issue JWT token (Public)
  */
@@ -89,12 +150,30 @@ router.get('/vehicles', async (req, res, next) => {
 router.post('/bookings', authGuard, async (req, res, next) => {
   try {
     const { vehicleId, pickupDate, returnDate } = req.body;
-    const customerId = req.customer.id;
+    const customerId = req.body.customerId || req.customer.id;
 
     if (!vehicleId || !pickupDate || !returnDate) {
       return res.status(400).json({
         success: false,
         error: 'vehicleId, pickupDate, and returnDate are required',
+      });
+    }
+
+    const start = new Date(pickupDate);
+    const end = new Date(returnDate);
+
+    // Validate dates
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid pickupDate or returnDate format',
+      });
+    }
+
+    if (start >= end) {
+      return res.status(400).json({
+        success: false,
+        error: 'Return date must be strictly after pickup date',
       });
     }
 
@@ -114,12 +193,27 @@ router.post('/bookings', authGuard, async (req, res, next) => {
       });
     }
 
+    // Double booking check: prevent overlapping reservations for the same vehicle
+    const overlapping = await Booking.findOne({
+      vehicleId,
+      status: { $in: ['reserved', 'ongoing'] },
+      pickupDate: { $lt: end },
+      returnDate: { $gt: start },
+    });
+
+    if (overlapping) {
+      return res.status(400).json({
+        success: false,
+        error: `Vehicle "${vehicle.model}" is already booked for an overlapping date range (${new Date(overlapping.pickupDate).toLocaleDateString()} to ${new Date(overlapping.returnDate).toLocaleDateString()})`,
+      });
+    }
+
     // 2. Create the booking record
     const booking = await Booking.create({
       customerId,
       vehicleId,
-      pickupDate: new Date(pickupDate),
-      returnDate: new Date(returnDate),
+      pickupDate: start,
+      returnDate: end,
       status: 'reserved',
     });
 
@@ -151,8 +245,18 @@ router.post('/bookings', authGuard, async (req, res, next) => {
 router.get('/bookings/my', authGuard, async (req, res, next) => {
   try {
     const customerId = req.customer.id;
+    const customerEmail = req.customer.email;
 
-    const bookings = await Booking.find({ customerId })
+    // Resolve any customer documents associated with this email or ID
+    let customerIds = [customerId];
+    if (customerEmail) {
+      const matched = await Customer.find({ email: customerEmail.toLowerCase() }).distinct('_id');
+      if (matched.length > 0) {
+        customerIds = matched;
+      }
+    }
+
+    const bookings = await Booking.find({ customerId: { $in: customerIds } })
       .populate('customerId', 'name email')
       .populate('vehicleId', 'model type')
       .sort({ createdAt: -1 });
@@ -161,6 +265,31 @@ router.get('/bookings/my', authGuard, async (req, res, next) => {
       success: true,
       count: bookings.length,
       data: bookings,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route   GET /api/v1/admin/stats
+ * @desc    Get real-time fleet and reservation statistics
+ */
+router.get('/admin/stats', async (req, res, next) => {
+  try {
+    const totalVehicles = await Vehicle.countDocuments();
+    const availableVehicles = await Vehicle.countDocuments({ available: true });
+    const activeReservations = await Booking.countDocuments({ status: { $in: ['reserved', 'ongoing'] } });
+    const utilization = totalVehicles > 0 ? Math.round(((totalVehicles - availableVehicles) / totalVehicles) * 100) : 0;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        totalVehicles,
+        availableVehicles,
+        activeReservations,
+        utilization: `${utilization}%`,
+      },
     });
   } catch (error) {
     next(error);

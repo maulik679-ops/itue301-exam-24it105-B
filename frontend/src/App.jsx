@@ -118,11 +118,7 @@ function App() {
           path="/my-bookings"
           element={
             <ProtectedRoute>
-              <MyBookingsPage
-                bookings={myBookings}
-                loading={bookingsLoading}
-                error={bookingsError}
-              />
+              <MyBookingsPage />
             </ProtectedRoute>
           }
         />

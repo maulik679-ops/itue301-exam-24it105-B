@@ -1,10 +1,51 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import { useAuth } from '../context/AuthContext';
 
-const MyBookingsPage = ({ bookings = [], loading = false, error = '' }) => {
+const API_BASE_URL = 'http://localhost:5000/api/v1';
+
+const MyBookingsPage = () => {
+  const { token } = useAuth();
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const fetchBookings = async () => {
+    if (!token) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await axios.get(`${API_BASE_URL}/bookings/my`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setBookings(res.data.data || res.data || []);
+    } catch (err) {
+      setError(err?.response?.data?.error || err.message || 'Failed to load bookings');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchBookings();
+  }, [token]);
+
   return (
     <div className="container">
-      <h2>My Car Bookings</h2>
-      <p style={{ color: '#718096' }}>Track the status of your vehicle reservations.</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h2>My Car Bookings</h2>
+          <p style={{ color: '#718096' }}>Track the status of your vehicle reservations.</p>
+        </div>
+        <button
+          type="button"
+          className="filter-btn"
+          style={{ background: '#1c3d5e', color: '#fff' }}
+          onClick={fetchBookings}
+        >
+          🔄 Refresh Bookings
+        </button>
+      </div>
 
       {loading && <div className="loading-spinner">⏳ Loading your bookings...</div>}
       {error && <div className="alert alert-error">❌ {error}</div>}
